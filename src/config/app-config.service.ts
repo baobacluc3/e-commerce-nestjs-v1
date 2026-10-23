@@ -21,4 +21,16 @@ export class AppConfigService {
   get logLevel(): Environment['LOG_LEVEL'] {
     return this.config.get('LOG_LEVEL', { infer: true });
   }
+
+  get jwtAccessSecret(): string {
+    return this.config.get('JWT_ACCESS_SECRET', { infer: true });
+  }
+
+  get jwtAccessTtl(): string {
+    return this.config.get('JWT_ACCESS_TTL', { infer: true });
+  }
+
+  get refreshTokenTtlDays(): number {
+    return this.config.get('REFRESH_TOKEN_TTL_DAYS', { infer: true });
+  }
 }
