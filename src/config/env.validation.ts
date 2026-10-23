@@ -9,6 +9,9 @@ export const environmentSchema = z.object({
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
     .default('info'),
+  JWT_ACCESS_SECRET: z.string().min(32, 'must be at least 32 characters long'),
+  JWT_ACCESS_TTL: z.string().min(1).default('15m'),
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(7),
 });
 
 export type Environment = z.infer<typeof environmentSchema>;
