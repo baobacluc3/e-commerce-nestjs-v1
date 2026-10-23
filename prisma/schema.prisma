@@ -7,3 +7,49 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// Conventions for every model:
+// - ids are UUIDv7 (time-ordered, good for indexes)
+// - tables and columns are snake_case in the database
+// - all timestamps are timestamptz
+
+enum Role {
+  CUSTOMER
+  ADMIN
+
+  @@map("role")
+}
+
+model User {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  role         Role     @default(CUSTOMER)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  refreshTokens RefreshToken[]
+
+  // Later phases add: cart, orders, stockMovements.
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  // All tokens created by one login share the same family_id.
+  familyId  String    @map("family_id") @db.Uuid
+  // SHA-256 hex of the token. The raw token is never stored.
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
