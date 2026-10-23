@@ -4,6 +4,7 @@ import { UserResponseDto } from '../users/dto/user-response.dto';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './current-user.decorator';
 import type { AuthUser } from './current-user.decorator';
+import { Public } from './public.decorator';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -15,17 +16,20 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   // Returns the user only. Tokens are issued by login.
+  @Public()
   @Post('register')
   register(@Body() dto: RegisterDto): Promise<UserResponseDto> {
     return this.authService.register(dto);
   }
 
+  @Public()
   @Post('login')
   @HttpCode(200)
   login(@Body() dto: LoginDto): Promise<TokenResponseDto> {
     return this.authService.login(dto);
   }
 
+  @Public()
   @Post('refresh')
   @HttpCode(200)
   refresh(@Body() dto: RefreshTokenDto): Promise<TokenResponseDto> {
@@ -33,6 +37,7 @@ export class AuthController {
   }
 
   // Always 204, even if the token is unknown.
+  @Public()
   @Post('logout')
   @HttpCode(204)
   async logout(@Body() dto: RefreshTokenDto): Promise<void> {
