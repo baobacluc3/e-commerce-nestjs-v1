@@ -33,6 +33,7 @@
     "@nestjs/terminus": "^11.1.1",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
+    "argon2": "^0.45.1",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "nestjs-pino": "^5.3.1",

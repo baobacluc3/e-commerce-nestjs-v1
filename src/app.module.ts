@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { LoggerModule } from 'nestjs-pino';
+import { AuthModule } from './auth/auth.module';
 import { AppConfigModule } from './config/app-config.module';
 import { AppConfigService } from './config/app-config.service';
 import { HealthModule } from './health/health.module';
@@ -56,6 +57,7 @@ import { UsersModule } from './users/users.module';
     PrismaModule,
     HealthModule,
     UsersModule,
+    AuthModule,
   ],
 })
 export class AppModule {}
