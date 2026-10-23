@@ -7,13 +7,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-
-// Runs before validation: " Jane@Example.COM " becomes "jane@example.com".
-const trimAndLowercase = ({ value }: { value: unknown }): unknown =>
-  typeof value === 'string' ? value.trim().toLowerCase() : value;
-
-const trim = ({ value }: { value: unknown }): unknown =>
-  typeof value === 'string' ? value.trim() : value;
+import { trim, trimAndLowercase } from '../../common/transforms';
 
 // There is no `role` field here on purpose. The global ValidationPipe uses
 // `forbidNonWhitelisted`, so a body with `role` is rejected with 400.
