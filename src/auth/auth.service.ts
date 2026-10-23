@@ -75,6 +75,58 @@ export class AuthService implements OnModuleInit {
     return this.issueTokens(this.prisma, user.id, user.role, randomUUID());
   }
 
+  // Swaps a refresh token for a new pair of tokens ("rotation").
+  // The old token is revoked and a new one is saved in the SAME family,
+  // inside one transaction: both happen or neither does.
+  async refresh(refreshToken: string): Promise<TokenPair> {
+    const tokenHash = this.tokenService.hashToken(refreshToken);
+
+    return this.prisma.$transaction(async (tx) => {
+      const row = await tx.refreshToken.findUnique({
+        where: { tokenHash },
+        include: { user: { select: { role: true } } },
+      });
+
+      // Unknown, expired and already-used tokens all get the same 401.
+      // (Revoking the whole family on reuse comes in Phase 9.)
+      if (!row || row.revokedAt !== null || row.expiresAt <= new Date()) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      // Revoke only if it is still active. If two requests use the same token
+      // at the same time, only one of them updates the row; the other gets 401.
+      const { count } = await tx.refreshToken.updateMany({
+        where: { id: row.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      if (count !== 1) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      return this.issueTokens(tx, row.userId, row.user.role, row.familyId);
+    });
+  }
+
+  // Revokes one refresh token. Does nothing if the token is unknown or
+  // already revoked, so the caller cannot learn whether a token existed.
+  async logout(refreshToken: string): Promise<void> {
+    await this.prisma.refreshToken.updateMany({
+      where: {
+        tokenHash: this.tokenService.hashToken(refreshToken),
+        revokedAt: null,
+      },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  // Revokes every active refresh token of the user (all devices).
+  async logoutAll(userId: string): Promise<void> {
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
   // Creates an access token and a new refresh token, and saves the refresh
   // token's hash. `db` can be a transaction client, so callers can make this
   // part of a bigger all-or-nothing change.
