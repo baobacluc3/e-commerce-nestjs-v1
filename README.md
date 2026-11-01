@@ -6,9 +6,16 @@
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-336791.svg)](https://www.postgresql.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 [![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF.svg)](.github/workflows/ci.yml)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Swagger_UI-success.svg)](https://e-commerce-nestjs-v1.onrender.com/docs)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 A production-grade, modular monolith e-commerce backend built with **strict TypeScript**, **NestJS**, **Prisma ORM**, and **PostgreSQL**.
+
+> 🌐 **Live Demo & API Docs**: **[https://e-commerce-nestjs-v1.onrender.com/docs](https://e-commerce-nestjs-v1.onrender.com/docs)**  
+> 🟢 **Health Check**: `https://e-commerce-nestjs-v1.onrender.com/health/live`  
+> 👤 **Pre-Seeded Test Credentials**:
+> - **Admin:** `admin@example.com` / `Password123!` (Full RBAC write access)
+> - **Customer:** `customer@example.com` / `Password123!` (Checkout & order flow)
 
 Designed with strict transactional integrity: atomic inventory decrements, server-side price calculation, frozen order snapshots, idempotency keys, cryptographic Stripe webhook verification, and zero-trust authentication with rotating refresh token families.
 
