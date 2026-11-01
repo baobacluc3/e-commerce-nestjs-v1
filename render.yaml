@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: ecommerce-nestjs-api
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install && npm run build
+    startCommand: npx prisma migrate deploy && node dist/main.js
+    healthCheckPath: /health/live
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_TTL
+        value: 15m
+      - key: REFRESH_TOKEN_TTL_DAYS
+        value: 7
+      - key: LOG_LEVEL
+        value: info
+      - key: STRIPE_SECRET_KEY
+        value: sk_test_local_placeholder
+      - key: STRIPE_WEBHOOK_SECRET
+        value: whsec_test_local_placeholder
