@@ -10,7 +10,7 @@ RUN apk add --no-cache libc6-compat
 # 2. Dependencies stage (installs all dependencies including dev)
 FROM base AS dependencies
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci || npm install
 
 # 3. Builder stage (compiles TypeScript and generates Prisma client)
 FROM base AS builder
