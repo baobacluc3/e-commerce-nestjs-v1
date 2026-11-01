@@ -33,4 +33,12 @@ export class AppConfigService {
   get refreshTokenTtlDays(): number {
     return this.config.get('REFRESH_TOKEN_TTL_DAYS', { infer: true });
   }
+
+  get stripeSecretKey(): string {
+    return this.config.get('STRIPE_SECRET_KEY', { infer: true });
+  }
+
+  get stripeWebhookSecret(): string {
+    return this.config.get('STRIPE_WEBHOOK_SECRET', { infer: true });
+  }
 }

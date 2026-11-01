@@ -5,5 +5,11 @@
   "testRegex": ".e2e-spec.ts$",
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "transformIgnorePatterns": [
+    "node_modules/(?!(@nestjs)/)"
+  ],
+  "moduleNameMapper": {
+    "^(\\./.*)\\.js$": "$1"
   }
 }

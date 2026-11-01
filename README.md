@@ -1,98 +1,378 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# E-Commerce REST API (NestJS + Prisma + PostgreSQL)
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
+[![NestJS](https://img.shields.io/badge/NestJS-11.0-red.svg)](https://nestjs.com/)
+[![Prisma](https://img.shields.io/badge/Prisma-7.10-2D3748.svg)](https://www.prisma.io/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-336791.svg)](https://www.postgresql.org/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
+[![CI](https://img.shields.io/badge/CI-GitHub_Actions-2088FF.svg)](.github/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+A production-grade, modular monolith e-commerce backend built with **strict TypeScript**, **NestJS**, **Prisma ORM**, and **PostgreSQL**.
 
-## Description
+Designed with strict transactional integrity: atomic inventory decrements, server-side price calculation, frozen order snapshots, idempotency keys, cryptographic Stripe webhook verification, and zero-trust authentication with rotating refresh token families.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+> 📖 **Interview Guide**: Check out [`INTERVIEW_PREP.md`](INTERVIEW_PREP.md) for a 3-minute architectural walkthrough, top 8 system design Q&A, and resume bullet points.  
+> 🛡️ **Security Policy**: Check out [`SECURITY.md`](SECURITY.md) for our full OWASP API Top 10 checklist, cryptographic standards, and automated regression test report.
 
-## Project setup
+---
 
-```bash
-$ npm install
+## Architecture & System Design
+
+### 1. High-Level Modular Monolith Architecture
+
+```mermaid
+flowchart TD
+    Client["Client (Browser / Mobile / Postman)"] -->|"HTTPS / REST"| SecurityLayer["Security Middleware<br/>(Helmet, CORS, Pino Logger, ThrottlerGuard)"]
+    
+    subgraph "NestJS Application Core"
+        SecurityLayer --> AuthGuard["JwtAuthGuard & RolesGuard"]
+        
+        AuthGuard --> AuthModule["Auth Module<br/>(Argon2id, JWT, Token Family)"]
+        AuthGuard --> ProductsModule["Products & Categories Module<br/>(Catalog, Search, Pagination)"]
+        AuthGuard --> InventoryModule["Inventory Module<br/>(Atomic Updates, Stock Audits)"]
+        AuthGuard --> CartModule["Cart Module<br/>(Server Calculations)"]
+        AuthGuard --> OrdersModule["Orders Module<br/>(Atomic $transaction, Idempotency)"]
+        AuthGuard --> PaymentsModule["Payments Module<br/>(Stripe Intents, HMAC Webhooks)"]
+        AuthGuard --> AdminModule["Admin Control Plane<br/>(KPI Metrics, Order Fulfillment)"]
+    end
+    
+    subgraph "Data & External Providers"
+        OrdersModule -->|"Prisma ORM"| Postgres[("PostgreSQL 18<br/>• Row-level locks<br/>• CHECK constraints<br/>• MVCC Transactions")]
+        InventoryModule -->|"Prisma ORM"| Postgres
+        AuthModule -->|"Prisma ORM"| Postgres
+        CartModule -->|"Prisma ORM"| Postgres
+        PaymentsModule -->|"Prisma ORM"| Postgres
+        AdminModule -->|"Prisma ORM"| Postgres
+        
+        PaymentsModule <-->|"HMAC-SHA256 Webhooks"| Stripe["Stripe Payments Engine"]
+    end
 ```
 
-## Compile and run the project
+---
 
-```bash
-# development
-$ npm run start
+### 2. Atomic Checkout & Payment Concurrency Lifecycle
 
-# watch mode
-$ npm run start:dev
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Customer
+    participant API as NestJS API (/orders/checkout)
+    participant DB as PostgreSQL 18
+    participant Stripe as Stripe API
+    actor Admin
 
-# production mode
-$ npm run start:prod
+    Customer->>API: POST /orders/checkout (Idempotency-Key: xyz)
+    activate API
+    Note over API,DB: Single Atomic $transaction
+    API->>DB: Check idempotency key (return existing if found)
+    API->>DB: Read active cart items & query live product prices
+    API->>DB: UPDATE "Product" SET stock = stock - qty WHERE id = $id AND stock >= qty
+    alt Out of Stock or Inactive
+        DB-->>API: 0 rows affected
+        API-->>Customer: 409 Conflict (Transaction Rolled Back)
+    else Stock Decremented Successfully
+        API->>DB: INSERT INTO "Order" (PENDING, frozen total)
+        API->>DB: INSERT INTO "OrderItem" (frozen price, SKU, name)
+        API->>DB: INSERT INTO "StockMovement" (OUT, balanceAfter)
+        API->>DB: DELETE FROM "CartItem" WHERE cartId = $cartId
+        DB-->>API: Transaction Committed
+        API-->>Customer: 201 Created (Order PENDING, expires in 15m)
+    end
+    deactivate API
+
+    Customer->>API: POST /payments/orders/:id/intent
+    API->>Stripe: Create PaymentIntent (metadata: { orderId, userId })
+    Stripe-->>API: Return client_secret & providerPaymentId
+    API-->>Customer: 201 Created (client_secret)
+
+    Note over Customer,Stripe: Customer completes card payment via Stripe Elements
+
+    Stripe->>API: POST /payments/webhook (payment_intent.succeeded + stripe-signature)
+    activate API
+    API->>API: Verify HMAC-SHA256 Signature with webhook secret
+    API->>DB: Check lastWebhookEventId (idempotent duplicate detection)
+    alt Already processed
+        API-->>Stripe: 200 OK (duplicate: true)
+    else First-time event
+        API->>DB: UPDATE "Order" SET status = PAID, paidAt = NOW()
+        API->>DB: INSERT INTO "Payment" (SUCCEEDED, eventId)
+        API-->>Stripe: 200 OK (received: true)
+    end
+    deactivate API
+
+    Admin->>API: PATCH /admin/orders/:id/status (status: SHIPPED)
+    API->>DB: Verify valid transition (PAID -> SHIPPED) & update
+    API-->>Admin: 200 OK (Order SHIPPED)
+
+    Customer->>API: GET /orders/:id
+    API-->>Customer: 200 OK (Order SHIPPED, frozen items confirmed)
 ```
 
-## Run tests
+---
 
-```bash
-# unit tests
-$ npm run test
+### 3. Database Entity-Relationship Diagram (ERD)
 
-# e2e tests
-$ npm run test:e2e
+```mermaid
+erDiagram
+    User ||--o{ RefreshToken : "owns"
+    User ||--o| Cart : "owns"
+    User ||--o{ Order : "places"
+    User ||--o{ StockMovement : "performs"
+    
+    Category ||--o{ Product : "categorizes"
+    Product ||--o{ StockMovement : "tracks"
+    Product ||--o{ CartItem : "contains"
+    Product ||--o{ OrderItem : "ordered_in"
 
-# test coverage
-$ npm run test:cov
+    Cart ||--o{ CartItem : "contains"
+    Order ||--o{ OrderItem : "contains"
+    Order ||--o{ Payment : "has"
+
+    User {
+        uuid id PK
+        string email UK
+        string password_hash
+        string name
+        enum role "CUSTOMER, ADMIN"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    RefreshToken {
+        uuid id PK
+        uuid user_id FK
+        uuid family_id
+        char64 token_hash UK
+        timestamptz expires_at
+        timestamptz revoked_at
+        timestamptz created_at
+    }
+
+    Category {
+        uuid id PK
+        string name UK
+        string slug UK
+        string description
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    Product {
+        uuid id PK
+        uuid category_id FK
+        string name
+        string slug UK
+        string sku UK
+        int price "in integer cents"
+        int stock "check stock >= 0"
+        boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    StockMovement {
+        uuid id PK
+        uuid product_id FK
+        uuid user_id FK
+        enum type "IN, OUT, ADJUSTMENT"
+        int quantity
+        int balance_after
+        string reason
+        string reference_id
+        timestamptz created_at
+    }
+
+    Cart {
+        uuid id PK
+        uuid user_id FK "unique (1 per user)"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    CartItem {
+        uuid id PK
+        uuid cart_id FK
+        uuid product_id FK
+        int quantity "check quantity > 0"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    Order {
+        uuid id PK
+        uuid user_id FK
+        enum status "PENDING, PAID, SHIPPED, COMPLETED, CANCELLED"
+        int total_price "in integer cents"
+        string idempotency_key
+        timestamptz expires_at
+        timestamptz paid_at
+        timestamptz cancelled_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    OrderItem {
+        uuid id PK
+        uuid order_id FK
+        uuid product_id FK
+        string product_name "frozen snapshot"
+        string product_sku "frozen snapshot"
+        int unit_price "frozen cents snapshot"
+        int quantity
+        int subtotal "frozen cents snapshot"
+        timestamptz created_at
+    }
+
+    Payment {
+        uuid id PK
+        uuid order_id FK
+        string provider
+        string provider_payment_id UK
+        enum status "PENDING, SUCCEEDED, FAILED"
+        int amount "in cents"
+        string currency
+        string client_secret
+        string last_webhook_event_id
+        timestamptz created_at
+        timestamptz updated_at
+    }
 ```
 
-## Deployment
+---
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Key Engineering Decisions & Architectural Trade-Offs
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+| Decision | Approach Chosen | Alternative Rejected | Architectural Justification |
+| :--- | :--- | :--- | :--- |
+| **Inventory Concurrency** | **Atomic SQL conditional updates** (`WHERE stock >= $2`) | Redis distributed lock (Redlock) | Eliminates external latency hops and split-brain risks; PostgreSQL MVCC row-level locking handles thousands of concurrent checkout operations natively with zero extra infrastructure. |
+| **Data Integrity Constraint** | **PostgreSQL `CHECK (stock >= 0)`** | Application-only validation checks | Guarantees that stock can never become negative at the storage layer even in the event of an application logic bug or direct database modification. |
+| **Price Calculations** | **Server-side only from live catalog** | Client-submitted subtotals/prices | Prevents price tampering, unauthorized discount injection, or stale pricing bugs. |
+| **Historical Invoices** | **Frozen snapshot columns in `OrderItem`** | Foreign-key lookups to `Product` table | Protects accounting integrity: if a merchant renames a product or adjusts prices next year, historical order invoices remain immutable. |
+| **Checkout Idempotency** | **Unique `Idempotency-Key` header** | Client-side debouncing only | Guarantees safe network retries; repeated requests return the identical existing order without duplicate charges or duplicate stock decrements. |
+| **Webhook Reliability** | **HMAC-SHA256 signature + Event ID tracking** | Unverified webhook endpoints | Protects against payload tampering, forgery, and replay attacks; duplicate webhook deliveries return `200 OK` with `{ duplicate: true }` without mutating state. |
+| **Authentication & Tokens** | **Argon2id + Token Family Rotation (SHA-256)** | Stateless JWTs or simple bcrypt | Argon2id provides memory-hardness against GPU cracking; rotating token families detect stolen tokens and instantly revoke the entire compromised session. |
+| **Mass Assignment** | **Global `ValidationPipe` with `forbidNonWhitelisted`** | Manual controller picking | Automatically rejects extra or unexpected properties (e.g. `{ role: "ADMIN" }`), preventing privilege escalation attempts. |
+
+---
+
+## Quickstart
+
+Run the entire application and database locally in 3 commands:
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+# 1. Clone repository and install dependencies
+git clone https://github.com/baobacluc3/e-commerce-nestjs-v1.git
+cd e-commerce-nestjs-v1
+npm install
+
+# 2. Setup environment variables
+cp .env.example .env
+
+# 3. Start database and API with Docker Compose
+docker compose up -d --build
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+The API will be live at `http://localhost:3000/api/v1` and interactive Swagger documentation at `http://localhost:3000/docs`.
 
-## Resources
+---
 
-Check out a few resources that may come in handy when working with NestJS:
+## Local Development (Without Docker for API)
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```bash
+# Start PostgreSQL database
+docker compose up -d postgres
 
-## Support
+# Push migrations & generate client
+npm run prisma:generate
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+# Seed sample data (admin user, categories, products with inventory)
+npm run db:seed
 
-## Stay in touch
+# Start development server
+npm run start:dev
+```
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+### Default Seed Credentials
+* **Admin**: `admin@example.com` / `Password123!`
+* **Customer**: `customer@example.com` / `Password123!`
+
+---
+
+## API Documentation (Swagger)
+
+Interactive Swagger UI documentation is available at:
+`http://localhost:3000/docs`
+
+### Core Endpoints Overview
+
+| Module | Method | Endpoint | Access | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| **Auth** | `POST` | `/api/v1/auth/register` | Public | Register new customer |
+| | `POST` | `/api/v1/auth/login` | Public | Authenticate & receive tokens |
+| | `POST` | `/api/v1/auth/refresh` | Public | Rotate refresh token family |
+| | `POST` | `/api/v1/auth/logout` | Public | Invalidate refresh token |
+| | `POST` | `/api/v1/auth/logout-all` | Customer / Admin | Invalidate all user sessions |
+| **Users** | `GET` | `/api/v1/users/me` | Customer / Admin | Get profile info |
+| **Products** | `GET` | `/api/v1/products` | Public | Paginated catalog with search/filter |
+| | `GET` | `/api/v1/products/:id` | Public | Get product details |
+| | `POST` | `/api/v1/products` | Admin | Create product with initial stock |
+| | `PATCH` | `/api/v1/products/:id` | Admin | Update product metadata |
+| | `DELETE` | `/api/v1/products/:id` | Admin | Soft-deactivate product |
+| **Inventory**| `GET` | `/api/v1/inventory/products/:id/stock` | Public | Check stock availability |
+| | `POST` | `/api/v1/inventory/products/:id/decrement` | Customer / Admin | Atomically decrement stock |
+| | `POST` | `/api/v1/inventory/products/:id/restock` | Admin | Atomically restock product |
+| | `POST` | `/api/v1/inventory/products/:id/adjust` | Admin | Adjust stock following cycle audit |
+| | `GET` | `/api/v1/inventory/low-stock` | Admin | List products below threshold |
+| | `GET` | `/api/v1/inventory/movements` | Admin | Complete movement audit log |
+| **Cart** | `GET` | `/api/v1/cart` | Customer / Admin | Get cart with server-calculated total |
+| | `POST` | `/api/v1/cart/items` | Customer / Admin | Add item or increment quantity |
+| | `PATCH` | `/api/v1/cart/items/:id` | Customer / Admin | Update item quantity |
+| | `DELETE`| `/api/v1/cart/items/:id` | Customer / Admin | Remove item from cart |
+| | `DELETE`| `/api/v1/cart` | Customer / Admin | Clear all cart items |
+| **Orders** | `POST` | `/api/v1/orders/checkout` | Customer / Admin | Atomic checkout with idempotency |
+| | `GET` | `/api/v1/orders` | Customer / Admin | User order history |
+| | `GET` | `/api/v1/orders/:id` | Owner / Admin | Order details & price snapshots |
+| | `POST` | `/api/v1/orders/:id/cancel` | Owner / Admin | Cancel order and restock inventory |
+| | `POST` | `/api/v1/orders/expire-unpaid` | Admin | Automated worker: restock expired orders |
+| **Payments** | `POST` | `/api/v1/payments/orders/:orderId/intent` | Owner / Admin | Create or reuse Stripe PaymentIntent |
+| | `GET` | `/api/v1/payments/orders/:orderId` | Owner / Admin | Payment attempts for order |
+| | `POST` | `/api/v1/payments/webhook` | Public (Signed) | Idempotent Stripe webhook receiver |
+| **Admin** | `GET` | `/api/v1/admin/metrics` | Admin | Real-time dashboard KPI metrics |
+| | `GET` | `/api/v1/admin/orders` | Admin | Cross-user order list with filters |
+| | `GET` | `/api/v1/admin/orders/:id` | Admin | Full order inspection + items + payments |
+| | `PATCH` | `/api/v1/admin/orders/:id/status` | Admin | State transition with cancel restock |
+| | `POST` | `/api/v1/admin/inventory/adjust` | Admin | Cycle count manual stock adjustment |
+| | `GET` | `/api/v1/admin/inventory/low-stock` | Admin | Products at/below stock threshold |
+| | `GET` | `/api/v1/admin/inventory/movements` | Admin | Complete stock audit trail |
+
+---
+
+## Testing & Code Quality
+
+```bash
+# Run unit & concurrency test suites (92 tests)
+npm test
+
+# Run end-to-end happy-path lifecycle journey test (Phase 10)
+# and automated OWASP API Top 10 security regression suite (Phase 9)
+npm run test:e2e
+
+# Run test coverage analysis (75%+ statement coverage)
+npm run test:cov
+
+# Run ESLint validation (0 errors)
+npm run lint
+
+# Format code with Prettier
+npm run format
+
+# Production build check
+npm run build
+```
+
+---
 
 ## License
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+This project is open-source under the [MIT License](LICENSE).

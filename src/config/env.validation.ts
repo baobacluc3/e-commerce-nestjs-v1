@@ -12,6 +12,11 @@ export const environmentSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(32, 'must be at least 32 characters long'),
   JWT_ACCESS_TTL: z.string().min(1).default('15m'),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().min(1).default(7),
+  STRIPE_SECRET_KEY: z.string().min(1).default('sk_test_local_placeholder'),
+  STRIPE_WEBHOOK_SECRET: z
+    .string()
+    .min(1)
+    .default('whsec_test_local_placeholder'),
 });
 
 export type Environment = z.infer<typeof environmentSchema>;

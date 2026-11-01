@@ -9,6 +9,7 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { JwtStrategy } from './jwt.strategy';
 import { PasswordService } from './password.service';
+import { RolesGuard } from './roles.guard';
 import { TokenService } from './token.service';
 
 @Module({
@@ -34,8 +35,12 @@ import { TokenService } from './token.service';
     PasswordService,
     TokenService,
     JwtStrategy,
-    // Registering the guard as APP_GUARD makes it apply to the whole app.
-    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    JwtAuthGuard,
+    RolesGuard,
+    // Registering the guards as APP_GUARD makes them apply globally across the app.
+    { provide: APP_GUARD, useExisting: JwtAuthGuard },
+    { provide: APP_GUARD, useExisting: RolesGuard },
   ],
+  exports: [RolesGuard],
 })
 export class AuthModule {}

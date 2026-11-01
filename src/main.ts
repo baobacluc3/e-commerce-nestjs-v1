@@ -4,7 +4,10 @@ import { AppConfigService } from './config/app-config.service';
 import { configureApp } from './app.setup';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+  });
   const config = app.get(AppConfigService);
   configureApp(app);
   app.enableShutdownHooks();

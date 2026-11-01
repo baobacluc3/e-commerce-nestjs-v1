@@ -29,9 +29,10 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  refreshTokens RefreshToken[]
-
-  // Later phases add: cart, orders, stockMovements.
+  refreshTokens  RefreshToken[]
+  stockMovements StockMovement[]
+  cart           Cart?
+  orders         Order[]
 
   @@map("users")
 }
@@ -52,4 +53,176 @@ model RefreshToken {
   @@index([userId])
   @@index([familyId])
   @@map("refresh_tokens")
+}
+
+model Category {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  products Product[]
+
+  @@map("categories")
+}
+
+enum StockMovementType {
+  IN
+  OUT
+  ADJUSTMENT
+
+  @@map("stock_movement_type")
+}
+
+model Product {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  name        String
+  slug        String   @unique
+  sku         String   @unique
+  description String?
+  price       Int // Price in integer cents (e.g. 1999 = $19.99)
+  stock       Int      @default(0)
+  isActive    Boolean  @default(true) @map("is_active")
+  categoryId  String?  @map("category_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  category       Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  stockMovements StockMovement[]
+  cartItems      CartItem[]
+  orderItems     OrderItem[]
+
+  @@index([categoryId])
+  @@index([isActive])
+  @@map("products")
+}
+
+model StockMovement {
+  id           String            @id @default(uuid(7)) @db.Uuid
+  productId    String            @map("product_id") @db.Uuid
+  type         StockMovementType
+  quantity     Int
+  balanceAfter Int               @map("balance_after")
+  reason       String?
+  referenceId  String?           @map("reference_id")
+  userId       String?           @map("user_id") @db.Uuid
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("stock_movements")
+}
+
+model Cart {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  userId    String   @unique @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  cartId    String   @map("cart_id") @db.Uuid
+  productId String   @map("product_id") @db.Uuid
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId])
+  @@index([cartId])
+  @@index([productId])
+  @@map("cart_items")
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  COMPLETED
+  CANCELLED
+
+  @@map("order_status")
+}
+
+model Order {
+  id             String      @id @default(uuid(7)) @db.Uuid
+  userId         String      @map("user_id") @db.Uuid
+  status         OrderStatus @default(PENDING)
+  totalPrice     Int         @map("total_price") // Snapshot in integer cents
+  idempotencyKey String?     @map("idempotency_key")
+  expiresAt      DateTime    @map("expires_at") @db.Timestamptz(3)
+  paidAt         DateTime?   @map("paid_at") @db.Timestamptz(3)
+  cancelledAt    DateTime?   @map("cancelled_at") @db.Timestamptz(3)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items    OrderItem[]
+  payments Payment[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId])
+  @@index([status, expiresAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  orderId     String   @map("order_id") @db.Uuid
+  productId   String   @map("product_id") @db.Uuid
+  productName String   @map("product_name")
+  productSku  String   @map("product_sku")
+  unitPrice   Int      @map("unit_price") // Snapshot in integer cents
+  quantity    Int
+  subtotal    Int // Snapshot in integer cents (unitPrice * quantity)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+
+  @@map("payment_status")
+}
+
+model Payment {
+  id                 String        @id @default(uuid(7)) @db.Uuid
+  orderId            String        @map("order_id") @db.Uuid
+  provider           String        @default("stripe")
+  providerPaymentId  String        @unique @map("provider_payment_id")
+  clientSecret       String?       @map("client_secret")
+  amount             Int // Amount in integer cents
+  currency           String        @default("usd") @db.VarChar(3)
+  status             PaymentStatus @default(PENDING)
+  lastWebhookEventId String?       @unique @map("last_webhook_event_id")
+  failureMessage     String?       @map("failure_message")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("payments")
 }
