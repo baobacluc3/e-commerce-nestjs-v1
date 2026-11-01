@@ -14,6 +14,7 @@ RUN npm ci || npm install
 
 # 3. Builder stage (compiles TypeScript and generates Prisma client)
 FROM base AS builder
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY package.json package-lock.json tsconfig*.json nest-cli.json ./
 COPY prisma.config.ts ./
