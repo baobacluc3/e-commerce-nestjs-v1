@@ -8,6 +8,8 @@ import { validateEnvironment } from './env.validation';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath:
+        process.env.NODE_ENV === 'test' ? ['.env.test', '.env'] : '.env',
       validate: validateEnvironment,
     }),
   ],

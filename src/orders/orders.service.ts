@@ -6,6 +6,7 @@ import {
   NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
 import type { AuthUser } from '../auth/current-user.decorator';
 import { AppConfigService } from '../config/app-config.service';
@@ -16,6 +17,11 @@ import {
   StockMovementType,
 } from '../generated/prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { OrderExpirationQueueService } from '../queues/order-expiration.queue';
+import type {
+  DeadLetterJobData,
+  OrderExpirationJobResult,
+} from '../queues/queue.constants';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import {
   OrderResponseDto,
@@ -24,8 +30,8 @@ import {
 import { QueryOrdersDto } from './dto/query-orders.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 
-const ORDER_PAYMENT_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const EXPIRY_SWEEP_INTERVAL_MS = 60 * 1000; // 1 minute
+export const ORDER_PAYMENT_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const EXPIRY_SWEEP_INTERVAL_MS = 60 * 1000; // 1 minute fallback sweep
 
 interface DecrementedProductRow {
   id: string;
@@ -56,11 +62,19 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
-  ) {}
+    @Optional()
+    private readonly orderExpirationQueue?: OrderExpirationQueueService,
+  ) {
+    if (this.orderExpirationQueue) {
+      this.orderExpirationQueue.registerProcessor((data) =>
+        this.expireOrder(data.orderId),
+      );
+    }
+  }
 
   onModuleInit(): void {
     // Run periodic sweep for unpaid expired orders outside of test runs
-    if (this.config.nodeEnv !== 'test') {
+    if (this.config.nodeEnv !== 'test' && process.env.NODE_ENV !== 'test') {
       this.expiryTimer = setInterval(() => {
         void this.expireUnpaidOrders().catch(() => {
           // Sweep errors are non-fatal to the process
@@ -90,6 +104,8 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
   ): Promise<OrderResponseDto> {
     const idempotencyKey = rawIdempotencyKey?.trim() || undefined;
 
+    const ttlMs = this.config.orderExpiryDelayMs ?? ORDER_PAYMENT_TTL_MS;
+
     if (idempotencyKey) {
       const existing = await this.prisma.order.findUnique({
         where: {
@@ -98,12 +114,15 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
         include: { items: true },
       });
       if (existing) {
+        if (existing.status === OrderStatus.PENDING) {
+          await this.scheduleOrderExpiration(existing, ttlMs);
+        }
         return existing;
       }
     }
 
     try {
-      return await this.prisma.$transaction(async (tx) => {
+      const createdOrder = await this.prisma.$transaction(async (tx) => {
         if (idempotencyKey) {
           const existingInTx = await tx.order.findUnique({
             where: {
@@ -190,7 +209,7 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           });
         }
 
-        const expiresAt = new Date(Date.now() + ORDER_PAYMENT_TTL_MS);
+        const expiresAt = new Date(Date.now() + ttlMs);
 
         const order = await tx.order.create({
           data: {
@@ -235,6 +254,12 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
 
         return order;
       });
+
+      if (createdOrder.status === OrderStatus.PENDING) {
+        await this.scheduleOrderExpiration(createdOrder, ttlMs);
+      }
+
+      return createdOrder;
     } catch (error) {
       // Handle race condition where two parallel requests with the same idempotencyKey collide on unique index
       if (
@@ -249,6 +274,9 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
           include: { items: true },
         });
         if (winningOrder) {
+          if (winningOrder.status === OrderStatus.PENDING) {
+            await this.scheduleOrderExpiration(winningOrder, ttlMs);
+          }
           return winningOrder;
         }
       }
@@ -510,6 +538,111 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Atomically expires a single unpaid PENDING order and restocks all reserved inventory.
+   * Strictly idempotent: running the same job twice (or on a PAID/CANCELLED/SHIPPED order)
+   * changes nothing in the database.
+   * All-or-nothing: if the worker is killed mid-transaction, PostgreSQL rolls back completely.
+   */
+  async expireOrder(
+    orderId: string,
+    preloadedOrder?: {
+      id: string;
+      status: OrderStatus;
+      items: Array<{ productId: string; quantity: number }>;
+    },
+  ): Promise<OrderExpirationJobResult> {
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      const order =
+        preloadedOrder ??
+        (await tx.order.findUnique({
+          where: { id: orderId },
+          include: { items: true },
+        }));
+
+      if (!order) {
+        return {
+          orderId,
+          cancelled: false,
+          status: 'NOT_FOUND',
+          restockedItemsCount: 0,
+          idempotentSkip: true,
+        };
+      }
+
+      if (order.status !== OrderStatus.PENDING) {
+        return {
+          orderId,
+          cancelled: false,
+          status: order.status,
+          restockedItemsCount: 0,
+          idempotentSkip: true,
+        };
+      }
+
+      const updated = await tx.order.updateMany({
+        where: {
+          id: order.id,
+          status: OrderStatus.PENDING,
+        },
+        data: {
+          status: OrderStatus.CANCELLED,
+          cancelledAt: now,
+        },
+      });
+
+      if (updated.count === 0) {
+        return {
+          orderId,
+          cancelled: false,
+          status: OrderStatus.CANCELLED,
+          restockedItemsCount: 0,
+          idempotentSkip: true,
+        };
+      }
+
+      const sortedItems = [...order.items].sort((a, b) =>
+        a.productId.localeCompare(b.productId),
+      );
+
+      let restockedItemsCount = 0;
+
+      for (const item of sortedItems) {
+        const restockedRows = await tx.$queryRaw<RestockedProductRow[]>`
+          UPDATE products
+          SET stock = stock + ${item.quantity}, updated_at = NOW()
+          WHERE id = ${item.productId}::uuid
+          RETURNING id, stock
+        `;
+
+        if (restockedRows.length > 0) {
+          restockedItemsCount += 1;
+          await tx.stockMovement.create({
+            data: {
+              productId: item.productId,
+              type: StockMovementType.IN,
+              quantity: item.quantity,
+              balanceAfter: restockedRows[0].stock,
+              reason: 'Order expired (unpaid)',
+              referenceId: order.id,
+              userId: null,
+            },
+          });
+        }
+      }
+
+      return {
+        orderId,
+        cancelled: true,
+        status: OrderStatus.CANCELLED,
+        restockedItemsCount,
+        idempotentSkip: false,
+      };
+    });
+  }
+
+  /**
    * Finds all PENDING orders whose expiresAt timestamp has passed,
    * cancels them atomically, and restocks their reserved items.
    */
@@ -529,53 +662,8 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
     const expiredOrderIds: string[] = [];
 
     for (const order of expiredOrders) {
-      const didExpire = await this.prisma.$transaction(async (tx) => {
-        const updated = await tx.order.updateMany({
-          where: {
-            id: order.id,
-            status: OrderStatus.PENDING,
-          },
-          data: {
-            status: OrderStatus.CANCELLED,
-            cancelledAt: now,
-          },
-        });
-
-        if (updated.count === 0) {
-          return false;
-        }
-
-        const sortedItems = [...order.items].sort((a, b) =>
-          a.productId.localeCompare(b.productId),
-        );
-
-        for (const item of sortedItems) {
-          const restockedRows = await tx.$queryRaw<RestockedProductRow[]>`
-            UPDATE products
-            SET stock = stock + ${item.quantity}, updated_at = NOW()
-            WHERE id = ${item.productId}::uuid
-            RETURNING id, stock
-          `;
-
-          if (restockedRows.length > 0) {
-            await tx.stockMovement.create({
-              data: {
-                productId: item.productId,
-                type: StockMovementType.IN,
-                quantity: item.quantity,
-                balanceAfter: restockedRows[0].stock,
-                reason: 'Order expired (unpaid)',
-                referenceId: order.id,
-                userId: null,
-              },
-            });
-          }
-        }
-
-        return true;
-      });
-
-      if (didExpire) {
+      const result = await this.expireOrder(order.id, order);
+      if (result.cancelled) {
         expiredOrderIds.push(order.id);
       }
     }
@@ -584,5 +672,33 @@ export class OrdersService implements OnModuleInit, OnModuleDestroy {
       expiredCount: expiredOrderIds.length,
       expiredOrderIds,
     };
+  }
+
+  getDeadLetterJobs(): DeadLetterJobData[] {
+    return this.orderExpirationQueue?.getDeadLetterJobs() ?? [];
+  }
+
+  async retryDeadLetterJob(
+    dlqJobId: string,
+  ): Promise<OrderExpirationJobResult> {
+    if (!this.orderExpirationQueue) {
+      throw new NotFoundException('Order expiration queue is not available');
+    }
+    return this.orderExpirationQueue.retryDeadLetterJob(dlqJobId);
+  }
+
+  private async scheduleOrderExpiration(
+    order: { id: string; userId: string; expiresAt?: Date },
+    delayMs: number,
+  ): Promise<void> {
+    if (!this.orderExpirationQueue) {
+      return;
+    }
+
+    await this.orderExpirationQueue.enqueueOrderExpiration(order.id, {
+      userId: order.userId,
+      expiresAt: order.expiresAt,
+      delayMs,
+    });
   }
 }

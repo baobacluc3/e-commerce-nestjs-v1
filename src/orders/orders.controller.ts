@@ -154,4 +154,25 @@ export class OrdersController {
   }> {
     return this.ordersService.expireUnpaidOrders();
   }
+
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary:
+      'Inspect permanently failed order expiration jobs in the Dead-Letter Queue (Admin only)',
+  })
+  @Get('queues/dlq')
+  getDeadLetterJobs() {
+    return this.ordersService.getDeadLetterJobs();
+  }
+
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary:
+      'Replay a failed order expiration job from the Dead-Letter Queue (Admin only)',
+  })
+  @HttpCode(HttpStatus.OK)
+  @Post('queues/dlq/:dlqJobId/retry')
+  async retryDeadLetterJob(@Param('dlqJobId') dlqJobId: string) {
+    return this.ordersService.retryDeadLetterJob(dlqJobId);
+  }
 }

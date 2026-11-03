@@ -53,6 +53,7 @@ flowchart TD
         AdminModule -->|"Prisma ORM"| Postgres
         
         PaymentsModule <-->|"HMAC-SHA256 Webhooks"| Stripe["Stripe Payments Engine"]
+        OrdersModule <-->|"BullMQ Delayed Jobs & DLQ"| Redis[("Redis 7 + BullMQ<br/>• 30m Order Expiry<br/>• Exponential Backoff<br/>• Dead-Letter Queue")]
     end
 ```
 
@@ -260,6 +261,7 @@ erDiagram
 | **Webhook Reliability** | **HMAC-SHA256 signature + Event ID tracking** | Unverified webhook endpoints | Protects against payload tampering, forgery, and replay attacks; duplicate webhook deliveries return `200 OK` with `{ duplicate: true }` without mutating state. |
 | **Authentication & Tokens** | **Argon2id + Token Family Rotation (SHA-256)** | Stateless JWTs or simple bcrypt | Argon2id provides memory-hardness against GPU cracking; rotating token families detect stolen tokens and instantly revoke the entire compromised session. |
 | **Mass Assignment** | **Global `ValidationPipe` with `forbidNonWhitelisted`** | Manual controller picking | Automatically rejects extra or unexpected properties (e.g. `{ role: "ADMIN" }`), preventing privilege escalation attempts. |
+| **Async Order Expiration** | **BullMQ + Redis delayed jobs with DLQ & idempotent `$transaction`** | Naive in-process `setInterval` only | Survives process restarts, retries transient failures with exponential backoff (`1s -> 2s -> 4s`), routes exhausted jobs to a Dead-Letter Queue (`order-expiration-dlq`), rolls back cleanly if killed mid-job, and guarantees running the same job twice changes nothing. |
 
 ---
 
@@ -342,6 +344,8 @@ Interactive Swagger UI documentation is available at:
 | | `GET` | `/api/v1/orders/:id` | Owner / Admin | Order details & price snapshots |
 | | `POST` | `/api/v1/orders/:id/cancel` | Owner / Admin | Cancel order and restock inventory |
 | | `POST` | `/api/v1/orders/expire-unpaid` | Admin | Automated worker: restock expired orders |
+| | `GET` | `/api/v1/orders/queues/dlq` | Admin | Inspect Dead-Letter Queue (`order-expiration-dlq`) |
+| | `POST` | `/api/v1/orders/queues/dlq/:dlqJobId/retry` | Admin | Replay a dead-letter expiration job |
 | **Payments** | `POST` | `/api/v1/payments/orders/:orderId/intent` | Owner / Admin | Create or reuse Stripe PaymentIntent |
 | | `GET` | `/api/v1/payments/orders/:orderId` | Owner / Admin | Payment attempts for order |
 | | `POST` | `/api/v1/payments/webhook` | Public (Signed) | Idempotent Stripe webhook receiver |

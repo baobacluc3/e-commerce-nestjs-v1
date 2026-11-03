@@ -503,4 +503,43 @@ describe('OrdersService', () => {
       });
     });
   });
+
+  describe('expireOrder (idempotent BullMQ job handler)', () => {
+    it('returns idempotentSkip=true and changes nothing when order is already CANCELLED or PAID', async () => {
+      prisma.order.findUnique.mockResolvedValueOnce({
+        id: 'ord-already-cancelled',
+        userId: userA.userId,
+        status: OrderStatus.CANCELLED,
+        items: [{ id: 'oi-1', productId: 'prod-1', quantity: 2 }],
+      });
+
+      const secondRun = await service.expireOrder('ord-already-cancelled');
+
+      expect(secondRun).toEqual({
+        orderId: 'ord-already-cancelled',
+        cancelled: false,
+        status: OrderStatus.CANCELLED,
+        restockedItemsCount: 0,
+        idempotentSkip: true,
+      });
+      expect(prisma.order.updateMany).not.toHaveBeenCalled();
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(prisma.stockMovement.create).not.toHaveBeenCalled();
+    });
+
+    it('returns idempotentSkip=true when order does not exist', async () => {
+      prisma.order.findUnique.mockResolvedValueOnce(null);
+
+      const res = await service.expireOrder('ord-missing');
+
+      expect(res).toEqual({
+        orderId: 'ord-missing',
+        cancelled: false,
+        status: 'NOT_FOUND',
+        restockedItemsCount: 0,
+        idempotentSkip: true,
+      });
+      expect(prisma.order.updateMany).not.toHaveBeenCalled();
+    });
+  });
 });

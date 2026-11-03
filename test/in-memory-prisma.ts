@@ -141,6 +141,39 @@ export class InMemoryDatabase {
     this.orderItems.clear();
     this.payments.clear();
   }
+
+  snapshot() {
+    const cloneMap = <V extends object>(map: Map<string, V>) =>
+      new Map<string, V>(
+        Array.from(map.entries()).map(([k, v]) => [k, { ...v }]),
+      );
+
+    return {
+      users: cloneMap(this.users),
+      refreshTokens: cloneMap(this.refreshTokens),
+      categories: cloneMap(this.categories),
+      products: cloneMap(this.products),
+      stockMovements: cloneMap(this.stockMovements),
+      carts: cloneMap(this.carts),
+      cartItems: cloneMap(this.cartItems),
+      orders: cloneMap(this.orders),
+      orderItems: cloneMap(this.orderItems),
+      payments: cloneMap(this.payments),
+    };
+  }
+
+  restore(snap: ReturnType<InMemoryDatabase['snapshot']>) {
+    this.users = snap.users;
+    this.refreshTokens = snap.refreshTokens;
+    this.categories = snap.categories;
+    this.products = snap.products;
+    this.stockMovements = snap.stockMovements;
+    this.carts = snap.carts;
+    this.cartItems = snap.cartItems;
+    this.orders = snap.orders;
+    this.orderItems = snap.orderItems;
+    this.payments = snap.payments;
+  }
 }
 
 export class InMemoryPrismaService {
@@ -161,7 +194,13 @@ export class InMemoryPrismaService {
   async $transaction<T>(
     callback: (tx: InMemoryPrismaService) => Promise<T>,
   ): Promise<T> {
-    return callback(this);
+    const snap = this.db.snapshot();
+    try {
+      return await callback(this);
+    } catch (error) {
+      this.db.restore(snap);
+      throw error;
+    }
   }
 
   async $queryRaw<T = unknown[]>(
@@ -205,7 +244,7 @@ export class InMemoryPrismaService {
       const productId = String(values[1]);
       const product = this.db.products.get(productId);
 
-      if (product && product.isActive) {
+      if (product) {
         product.stock += quantity;
         product.updatedAt = new Date();
         return [{ id: product.id, stock: product.stock }] as T;
@@ -697,7 +736,11 @@ export class InMemoryPrismaService {
       where,
       include,
     }: {
-      where?: { userId?: string; status?: OrderStatus };
+      where?: {
+        userId?: string;
+        status?: OrderStatus;
+        expiresAt?: { lte?: Date };
+      };
       include?: { items?: boolean; user?: boolean };
       skip?: number;
       take?: number;
@@ -706,6 +749,10 @@ export class InMemoryPrismaService {
       let list = Array.from(this.db.orders.values());
       if (where?.userId) list = list.filter((o) => o.userId === where.userId);
       if (where?.status) list = list.filter((o) => o.status === where.status);
+      if (where?.expiresAt?.lte) {
+        const lte = where.expiresAt.lte;
+        list = list.filter((o) => o.expiresAt.getTime() <= lte.getTime());
+      }
 
       return list.map((order) => {
         const item: Record<string, unknown> = { ...order };

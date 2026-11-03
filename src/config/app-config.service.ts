@@ -41,4 +41,25 @@ export class AppConfigService {
   get stripeWebhookSecret(): string {
     return this.config.get('STRIPE_WEBHOOK_SECRET', { infer: true });
   }
+
+  get redisUrl(): string {
+    return (
+      this.config.get('REDIS_URL', { infer: true }) ?? 'redis://localhost:6379'
+    );
+  }
+
+  get orderExpiryDelayMs(): number {
+    return (
+      this.config.get('ORDER_EXPIRY_DELAY_MS', { infer: true }) ??
+      30 * 60 * 1000
+    );
+  }
+
+  get queueMaxRetries(): number {
+    return this.config.get('QUEUE_MAX_RETRIES', { infer: true }) ?? 3;
+  }
+
+  get queueBackoffDelayMs(): number {
+    return this.config.get('QUEUE_BACKOFF_DELAY_MS', { infer: true }) ?? 1000;
+  }
 }

@@ -24,3 +24,11 @@ services:
         value: sk_test_local_placeholder
       - key: STRIPE_WEBHOOK_SECRET
         value: whsec_test_local_placeholder
+      - key: REDIS_URL
+        sync: false
+      - key: ORDER_EXPIRY_DELAY_MS
+        value: 1800000
+      - key: QUEUE_MAX_RETRIES
+        value: 3
+      - key: QUEUE_BACKOFF_DELAY_MS
+        value: 1000

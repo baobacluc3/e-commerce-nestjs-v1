@@ -18,6 +18,21 @@ services:
       retries: 10
       start_period: 5s
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
   api:
     build:
       context: .
@@ -26,12 +41,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "${PORT:-3000}:3000"
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-ecommerce}:${POSTGRES_PASSWORD:-local_dev_only}@postgres:5432/${POSTGRES_DB:-ecommerce}
+      REDIS_URL: redis://redis:6379
+      ORDER_EXPIRY_DELAY_MS: ${ORDER_EXPIRY_DELAY_MS:-1800000}
+      QUEUE_MAX_RETRIES: ${QUEUE_MAX_RETRIES:-3}
+      QUEUE_BACKOFF_DELAY_MS: ${QUEUE_BACKOFF_DELAY_MS:-1000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-change-me-local-dev-only-secret-at-least-32-chars}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
@@ -45,3 +66,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

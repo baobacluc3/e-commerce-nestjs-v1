@@ -14,6 +14,7 @@ import { OrdersModule } from './orders/orders.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
+import { QueuesModule } from './queues/queues.module';
 import { UsersModule } from './users/users.module';
 
 @Module({
@@ -73,6 +74,7 @@ import { UsersModule } from './users/users.module';
       ],
     }),
     PrismaModule,
+    QueuesModule,
     HealthModule,
     UsersModule,
     AuthModule,
